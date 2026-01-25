@@ -37,12 +37,51 @@
                   line: { color: "#666", width: 1.5, dash: "dot" } }]
     };
     Plotly.relayout(el, updates);
-    
-    // Update hovertemplates for cleaner display
-    var westHover = "<b>%{hovertext}</b><br><br>Bank Side: West<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{y:+.1f} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
-    var eastHover = "<b>%{hovertext}</b><br><br>Bank Side: East<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{y:+.1f} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
-    var middleHover = "<b>%{hovertext}</b><br><br>Bank Side: Middle<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{y:+.1f} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
-    Plotly.restyle(el, {hovertemplate: [westHover, eastHover, middleHover]});
+// Fix hover rounding when y is binary-encoded (bdata) by using calcdata.
+function formatSigned(num, decimals) {
+  if (num === null || num === undefined || isNaN(num)) return "";
+  var n = Number(num);
+  var s = (n >= 0 ? "+" : "");
+  return s + n.toFixed(decimals);
+}
+
+function applyHoverRounding() {
+  if (!el.calcdata || !el.calcdata.length) return false;
+
+  var decimals = 1;
+
+  // Pull numeric y values from calcdata, round them, and store as strings in customdata
+  for (var ti = 0; ti < el.data.length; ti++) {
+    var traceCd = el.calcdata[ti];
+    if (!traceCd) continue;
+
+    var arr = new Array(traceCd.length);
+    for (var pi = 0; pi < traceCd.length; pi++) {
+      var pt = traceCd[pi] || {};
+      var yv = pt.y;
+      if (yv === undefined && pt.pt && pt.pt.y !== undefined) yv = pt.pt.y; // fallback for some trace types
+      arr[pi] = formatSigned(yv, decimals);
+    }
+
+    // restyle per-trace so array lengths line up correctly
+    Plotly.restyle(el, { customdata: [arr] }, [ti]);
+  }
+
+  // Display %{customdata} in the hovertemplate instead of %{y}
+  var westHover = "<b>%{hovertext}</b><br><br>Bank Side: West<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{customdata} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
+  var eastHover = "<b>%{hovertext}</b><br><br>Bank Side: East<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{customdata} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
+  var middleHover = "<b>%{hovertext}</b><br><br>Bank Side: Middle<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{customdata} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
+  Plotly.restyle(el, { hovertemplate: [westHover, eastHover, middleHover] });
+
+  return true;
+}
+
+// calcdata is available after Plotly finishes drawing; retry a few times just in case
+(function retryHoverFix(triesLeft) {
+  if (applyHoverRounding()) return;
+  if (triesLeft <= 0) return;
+  setTimeout(function() { retryHoverFix(triesLeft - 1); }, 50);
+})(30);
   }
   if (document.readyState === "complete") setTimeout(applyStyling, 0);
   else window.addEventListener("load", applyStyling);
