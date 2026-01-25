@@ -38,11 +38,53 @@
     };
     Plotly.relayout(el, updates);
     
-    // Update hovertemplates for cleaner display
-    var westHover = "<b>%{hovertext}</b><br><br>Bank Side: West<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{y:+.1f} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
-    var eastHover = "<b>%{hovertext}</b><br><br>Bank Side: East<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{y:+.1f} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
-    var middleHover = "<b>%{hovertext}</b><br><br>Bank Side: Middle<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{y:+.1f} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
-    Plotly.restyle(el, {hovertemplate: [westHover, eastHover, middleHover]});
+    // Fix hover rounding for binary-encoded (bdata) traces:
+    // - Read numeric y values from el.calcdata (Plotly's processed values)
+    // - Round/format them in JS and store as formatted strings in customdata
+    // - Use %{customdata} in hovertemplate instead of %{y}
+    function formatY(y) {
+      if (y === null || y === undefined || isNaN(y)) return "";
+      var s = Number(y).toFixed(1);
+      return (Number(y) >= 0 ? "+" : "") + s;
+    }
+
+    function updateCustomdataAndHover() {
+      if (!el.calcdata || !el.calcdata.length) return false;
+
+      var customdatas = [];
+      for (var t = 0; t < el.calcdata.length; t++) {
+        var cd = el.calcdata[t] || [];
+        var arr = new Array(cd.length);
+        for (var i = 0; i < cd.length; i++) {
+          // For scatter, calcdata items usually store point values at .x and .y
+          var yv = cd[i] && cd[i].y;
+          arr[i] = formatY(yv);
+        }
+        customdatas.push(arr);
+      }
+
+      // Set customdata per trace
+      Plotly.restyle(el, {customdata: customdatas});
+
+      // Update hovertemplates for cleaner display (use customdata for y)
+      var westHover = "<b>%{hovertext}</b><br><br>Bank Side: West<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{customdata} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
+      var eastHover = "<b>%{hovertext}</b><br><br>Bank Side: East<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{customdata} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
+      var middleHover = "<b>%{hovertext}</b><br><br>Bank Side: Middle<br>Distance to Downtown: %{x:.1f} km<br>Transit Time Change: %{customdata} minutes<br>Population (Census 2021): %{marker.size:,.0f}<extra></extra>";
+      Plotly.restyle(el, {hovertemplate: [westHover, eastHover, middleHover]});
+
+      return true;
+    }
+
+    // Ensure calcdata exists (it is created after plotting). If not ready yet,
+    // wait for the first afterplot event.
+    if (!updateCustomdataAndHover()) {
+      var handler = function() {
+        if (updateCustomdataAndHover()) {
+          el.removeListener("plotly_afterplot", handler);
+        }
+      };
+      el.on("plotly_afterplot", handler);
+    }
   }
   if (document.readyState === "complete") setTimeout(applyStyling, 0);
   else window.addEventListener("load", applyStyling);
